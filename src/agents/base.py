@@ -121,58 +121,80 @@ class PortingSpecialistAgent(BaseAgent):
             else:
                 self.log("No strong memory match.", "observation")
 
-            # === Real decision logic using memory patterns ===
-            self.log("Analyzing error against retrieved memory patterns...", "thought")
+            # === Smarter decision logic using memory patterns ===
+            self.log("Analyzing error + source against retrieved memory patterns...", "thought")
 
             patched = False
+            error_lower = error_text.lower()
+            source_lower = source_text.lower()
+
             for pattern in patterns:
-                cuda_str = str(pattern.get("cuda", ""))
-                hip_str = str(pattern.get("hip", ""))
+                pid = pattern.get('pattern_id', 'unknown')
+                cuda_str = str(pattern.get("cuda", "")).strip()
+                hip_str = str(pattern.get("hip", "")).strip()
                 notes = str(pattern.get("notes", ""))
 
-                # Try to find a matching bad string in the current source based on the pattern
-                if cuda_str and cuda_str in source_text:
-                    self.log(f"Applying pattern '{pattern.get('pattern_id')}' : {cuda_str} → {hip_str}", "thought")
-                    self.log(f"Reason from memory: {notes}", "observation")
+                # Try direct string match in source or error
+                candidate_old = None
+                if cuda_str and (cuda_str in source_text or cuda_str.lower() in error_lower):
+                    candidate_old = cuda_str
+                elif "cudaMemcpy" in cuda_str and ("memcpy" in error_lower or "memcpy" in source_lower):
+                    # Special handling for common partial matches
+                    for possible in ["cudaMemcpy", "cudaMemcpyAsync"]:
+                        if possible in source_text:
+                            candidate_old = possible
+                            break
 
-                    # Record decision on blackboard
+                if candidate_old:
+                    self.log(f"Matched pattern '{pid}': {cuda_str} → {hip_str}", "thought")
+                    self.log(f"Memory note: {notes}", "observation")
+
                     registry.execute(
                         "write_agent_note",
-                        note=f"Applied pattern {pattern.get('pattern_id')}: {cuda_str} -> {hip_str}. Reason: {notes}"
+                        note=f"Decided on pattern {pid} because error/source contained '{candidate_old}'. Applying: {hip_str}"
                     )
+
+                    replacement = hip_str
+                    if "hipLaunchKernel" in hip_str or "hip kernel launch" in hip_str.lower():
+                        # Make a concrete replacement for launch syntax
+                        replacement = "hipLaunchKernel(grid, block, 0, 0, vectorAdd, args);  // repaired via memory pattern " + pid
 
                     patch = registry.execute(
                         "apply_search_replace",
                         relative_path="hip_out/vectorAdd.hip.cpp",
-                        old_text=cuda_str,
-                        new_text=hip_str + "  // repaired using memory pattern " + pattern.get('pattern_id', ''),
+                        old_text=candidate_old,
+                        new_text=replacement,
                     )
                     if patch.get("success"):
-                        self.log("Memory-guided patch applied successfully.", "action")
+                        self.log(f"Successfully applied memory pattern '{pid}'.", "action")
                         patched = True
                         break
+                    else:
+                        self.log(f"Patch for pattern {pid} failed: {patch.get('error')}", "observation")
 
             if not patched:
-                # Fallback to a couple of well-known patterns if memory didn't give exact string
-                if "cudaLaunchKernel" in error_text or "cudaLaunchKernel" in source_text:
-                    self.log("Falling back to known kernel launch repair...", "thought")
+                # Broader fallback for launch syntax (very common)
+                if any(kw in error_lower or kw in source_lower for kw in ["launchkernel", "kernel launch", "<<<", "cuda<<<"]):
+                    self.log("No exact memory string match, but detected kernel launch issue. Applying standard fix...", "thought")
                     for old in [
                         "cudaLaunchKernel<<<grid, block>>>(vectorAdd, grid, block, 0, 0, args);",
                         "cudaLaunchKernel<<<grid, block>>>(vectorAddKernel, grid, block, 0, 0, args);",
+                        "vectorAdd<<<grid, block>>>(args);",
                     ]:
-                        patch = registry.execute(
-                            "apply_search_replace",
-                            relative_path="hip_out/vectorAdd.hip.cpp",
-                            old_text=old,
-                            new_text="hipLaunchKernel(grid, block, 0, 0, vectorAdd, args);  // repaired by Porting Specialist + memory",
-                        )
-                        if patch.get("success"):
-                            self.log("Fallback kernel launch patch applied.", "action")
-                            patched = True
-                            break
+                        if old in source_text:
+                            patch = registry.execute(
+                                "apply_search_replace",
+                                relative_path="hip_out/vectorAdd.hip.cpp",
+                                old_text=old,
+                                new_text="hipLaunchKernel(grid, block, 0, 0, vectorAdd, args);  // repaired by Porting Specialist using launch pattern",
+                            )
+                            if patch.get("success"):
+                                self.log("Applied standard kernel launch repair.", "action")
+                                patched = True
+                                break
 
             if not patched:
-                self.log("Could not find a matching patch from memory or fallbacks. Would escalate to LLM in full mode.", "observation")
+                self.log("Could not auto-apply a patch from current memory patterns. In full agent mode this would trigger LLM creative repair or ask human.", "thought")
 
         self.log("Repair budget exhausted. Will produce diagnostic report.", "thought")
         return {"status": "exhausted", "attempts": max_loops}

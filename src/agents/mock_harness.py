@@ -49,18 +49,22 @@ def _append_message(job: JobState, agent: str, typ: str, content: str) -> None:
 def run_mock_repair_loop(
     seed_id: str = "vectorAdd",
     job_id: str | None = None,
+    scenario: str = "kernel_launch",
 ) -> JobState:
     """
-    Clean, polished demo harness for Phase 2 repair behavior.
+    Polished demo harness supporting multiple error scenarios.
 
-    - Sets up a realistic job workspace with a deliberately broken HIP file.
-    - Delegates to PortingSpecialistAgent.repair_with_memory() which contains
-      the actual diagnosis + memory + patching logic.
-    - All steps produce proper AgentMessage objects that will render in the
-      existing UI (AgentFeed + LiveJobView).
+    Scenarios (based on memory/porting_patterns.jsonl):
+      - "kernel_launch": classic <<< >>> / cudaLaunchKernel issue
+      - "memcpy": cudaMemcpy not translated
+      - "atomic": atomicAdd in reduction
+      - "arch": wrong -arch compile flag (simulated as hipcc error)
+
+    The harness sets up the appropriate "bad" source + error log,
+    then runs the real PortingSpecialistAgent.repair_with_memory() logic.
     """
     if job_id is None:
-        job_id = f"mock_repair_{seed_id.lower()}"
+        job_id = f"mock_{scenario}_{seed_id.lower()}"
 
     ws = WorkspaceManager()
     job = JobState(seed_id=SeedId(seed_id))  # type: ignore[arg-type]
@@ -70,65 +74,78 @@ def run_mock_repair_loop(
     seeds_root = Path(__file__).resolve().parents[2] / "seeds"
     ws.copy_seed(job, seeds_root)
 
-    # Prepare a "bad" post-hipify file that triggers a known memory pattern
     hip_out = ws_dir / "hip_out"
     hip_out.mkdir(exist_ok=True)
-    (hip_out / "vectorAdd.hip.cpp").write_text(
-        "// Intentionally left with classic CUDA launch syntax after hipify\n"
-        "void vectorAdd(...) {\n"
-        "    cudaLaunchKernel<<<grid, block>>>(vectorAdd, grid, block, 0, 0, args);\n"
-        "}\n",
-        encoding="utf-8"
-    )
-
-    # Seed a realistic compiler error log
     logs = ws_dir / "logs"
     logs.mkdir(exist_ok=True)
-    (logs / "hipcc.log").write_text(
-        "hipcc: error: unknown identifier 'cudaLaunchKernel'\n"
-        "    cudaLaunchKernel<<<grid, block>>>(...);\n"
-        "    ^\n"
-        "1 error generated when compiling for gfx942\n",
-        encoding="utf-8"
-    )
+
+    # === Scenario setup: always write the bad source to vectorAdd.hip.cpp (what the current agent patch code targets)
+    # The content is chosen to match one of the patterns exactly for reliable dynamic patching.
+    if scenario == "kernel_launch":
+        (hip_out / "vectorAdd.hip.cpp").write_text(
+            "cudaLaunchKernel<<<grid, block>>>(vectorAdd, grid, block, 0, 0, args);\n",
+            encoding="utf-8")
+        (logs / "hipcc.log").write_text(
+            "hipcc: error: unknown identifier 'cudaLaunchKernel'\n", encoding="utf-8")
+
+    elif scenario == "memcpy":
+        (hip_out / "vectorAdd.hip.cpp").write_text(
+            "cudaMemcpy(d_c, d_a, size, cudaMemcpyDeviceToHost);\n",
+            encoding="utf-8")
+        (logs / "hipcc.log").write_text(
+            "hipcc: error: no member named 'cudaMemcpyDeviceToHost' in namespace 'hip'\n", encoding="utf-8")
+
+    elif scenario == "atomic":
+        (hip_out / "vectorAdd.hip.cpp").write_text(
+            "atomicAdd(&result, val);\n",
+            encoding="utf-8")
+        (logs / "hipcc.log").write_text(
+            "hipcc: warning: atomicAdd may have performance issues on gfx942. Use HIP version.\n", encoding="utf-8")
+
+    elif scenario == "arch":
+        (hip_out / "vectorAdd.hip.cpp").write_text("// source is fine\n", encoding="utf-8")
+        (logs / "hipcc.log").write_text(
+            "hipcc: error: unsupported target 'sm_80' for this ROCm version. Use --offload-arch=gfx942\n", encoding="utf-8")
+
+    else:
+        (hip_out / "vectorAdd.hip.cpp").write_text(
+            "cudaLaunchKernel<<<grid, block>>>(vectorAdd, grid, block, 0, 0, args);\n",
+            encoding="utf-8")
+        (logs / "hipcc.log").write_text("unknown identifier 'cudaLaunchKernel'\n", encoding="utf-8")
 
     registry = create_tool_registry(job_id, ws, seeds_root)
     memory = get_memory()
 
-    # Create the specialist that now holds the real logic
     from src.agents.base import PortingSpecialistAgent
     specialist = PortingSpecialistAgent("Porting Specialist", job, registry, memory)
 
-    _append_message(job, "Orchestrator", "thought", f"Starting autonomous repair for seed {seed_id} on mock MI300X")
+    _append_message(job, "Orchestrator", "thought", f"Starting repair for {seed_id} (scenario={scenario})")
 
-    # === Call the real logic ===
     result = specialist.repair_with_memory(max_loops=3)
 
-    _append_message(
-        job, "Orchestrator", "thought",
-        f"Repair loop completed. Final status: {result.get('status')} after {result.get('attempts', '?')} attempts"
-    )
+    _append_message(job, "Orchestrator", "thought",
+                    f"Repair finished: {result.get('status')} after {result.get('attempts', '?')} attempts")
 
     return job
 
 
 if __name__ == "__main__":
     print("=" * 72)
-    print("ROCmForge — Phase 2 Mock Repair Loop Demo")
+    print("ROCmForge — Phase 2 Mock Repair Loop Demo (multiple scenarios)")
     print("=" * 72)
-    print("This harness runs the *real* repair logic living in PortingSpecialistAgent")
-    print("using the actual ToolRegistry + Memory (no LLM yet).\n")
+    print("Demonstrates the *real* PortingSpecialistAgent logic + Memory + Tools\n")
 
-    job = run_mock_repair_loop()
+    scenarios = ["kernel_launch", "memcpy", "atomic"]
+    for sc in scenarios:
+        print(f"\n--- Scenario: {sc} ---")
+        job = run_mock_repair_loop(scenario=sc)
+        # Print last few messages for this scenario
+        for msg in job.messages[-6:]:
+            prefix = "💭" if msg.type == "thought" else ("🔧" if msg.type == "action" else "👁")
+            print(f"  {prefix} {msg.agent}: {msg.content[:80]}")
 
     print("\n" + "=" * 72)
-    print("AGENT TRACE (this is what will appear in the Live UI AgentFeed)")
-    print("=" * 72)
-    for msg in job.messages:
-        prefix = "💭" if msg.type == "thought" else ("🔧" if msg.type == "action" else "👁")
-        print(f"{prefix} [{msg.timestamp}] {msg.agent}: {msg.content}")
-
-    print("\n✅ Harness complete.")
-    print("   The job object now contains a full realistic repair trace.")
-    print("   In production this trace will be produced by an LLM calling the same tools.")
+    print("✅ All scenarios completed.")
+    print("   Each run uses the same smart agent logic + memory patterns.")
+    print("   On real MI300X + vLLM this becomes fully autonomous.")
     print("=" * 72)
