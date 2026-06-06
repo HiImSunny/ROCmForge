@@ -72,8 +72,9 @@ def _to_response(job: JobState) -> JobResponse:
 async def health() -> HealthResponse:
     gpu = get_gpu_info()
     name = gpu.get("name") or gpu.get("raw", "unknown")[:80]
+    tools_available = is_rocm_available()
     return HealthResponse(
-        rocm_available=is_rocm_available(),
+        rocm_available=tools_available,
         gpu_name=name,
         rocm_version=gpu.get("rocm"),
         vllm_reachable=False,  # Phase 2

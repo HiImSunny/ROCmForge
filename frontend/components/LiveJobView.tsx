@@ -20,6 +20,8 @@ interface JobData {
   messages: any[];
   metrics: any;
   completed_phases: string[];
+  duration_seconds?: number | null;
+  error?: string | null;
 }
 
 export function LiveJobView({ jobId, isReplay, onClose }: LiveJobViewProps) {
@@ -53,29 +55,42 @@ export function LiveJobView({ jobId, isReplay, onClose }: LiveJobViewProps) {
     fetchStatus();
 
     // Try real SSE (improved backend sends "update" events with full snapshot)
-    try {
-      es = new EventSource(getStreamUrlFromJobId(jobId));
-      es.addEventListener('update', (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          setJobData({
-            seed_id: data.seed_id,
-            phase: data.phase,
-            status: data.status,
-            messages: data.messages,
-            metrics: data.metrics,
-            completed_phases: data.completed_phases,
-          });
-        } catch {}
-      });
-      es.addEventListener('done', () => {
-        fetchStatus(); // final sync
-      });
-      es.onerror = () => {
+    // Auto-reconnect for better live experience on cloud instances
+    const connectSSE = () => {
+      try {
         if (es) es.close();
-        es = null;
-      };
-    } catch {}
+        es = new EventSource(getStreamUrlFromJobId(jobId));
+        es.addEventListener('update', (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            setJobData({
+              seed_id: data.seed_id,
+              phase: data.phase,
+              status: data.status,
+              messages: data.messages,
+              metrics: data.metrics,
+              completed_phases: data.completed_phases,
+              duration_seconds: data.duration_seconds,
+              error: data.error,
+            });
+          } catch {}
+        });
+        es.addEventListener('done', () => {
+          fetchStatus();
+          if (es) es.close();
+        });
+        es.onerror = () => {
+          // Auto-reconnect after a short delay
+          if (es) es.close();
+          es = null;
+          setTimeout(connectSSE, 1500);
+        };
+      } catch {
+        // will fall back to polling
+      }
+    };
+
+    connectSSE();
 
     // Fallback polling every 1.2s
     pollInterval = setInterval(fetchStatus, 1200);

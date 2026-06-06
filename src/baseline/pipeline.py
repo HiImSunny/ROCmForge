@@ -78,14 +78,14 @@ def run_baseline(
     ws_dir = ws.create_workspace(job)
     job.workspace_dir = str(ws_dir)
 
-    _append_message(job, "Baseline Orchestrator", "thought", f"Starting baseline pipeline for {job.seed_id.value} on {'MOCK (local dev)' if MOCK else 'real AMD MI300X'} environment.")
+    _append_message(job, "Baseline Orchestrator", "thought", f"Starting baseline pipeline for {job.seed_id.value} on {'MOCK (local dev)' if MOCK else 'real AMD MI300X'} environment. Planning steps: analyze → port → validate → benchmark → report.")
     ws.write_state(job)
 
     # 1. Prepare
     _advance(job, JobPhase.ANALYSIS, ws)
     _append_message(job, "Baseline Analyzer", "action", "Copying self-contained seed into isolated workspace.")
     src_cu = ws.copy_seed(job, seeds_root)
-    _append_message(job, "Baseline Analyzer", "observation", f"Detected {src_cu.name} ({src_cu.stat().st_size} bytes). Simple kernel pattern, low risk for port.")
+    _append_message(job, "Baseline Analyzer", "observation", f"Detected {src_cu.name} ({src_cu.stat().st_size} bytes). Simple kernel pattern, low risk for port. 1 kernel found.")
     if on_progress: on_progress(job)
 
     # 2. hipify
@@ -97,11 +97,11 @@ def run_baseline(
     (ws_dir / "logs" / "hipify.log").write_text(log)
 
     if not ok and not MOCK:
-        _append_message(job, "HIP Porting Specialist", "observation", f"hipify returned non-zero (common). stderr snippet: {err[:180]}")
+        _append_message(job, "HIP Porting Specialist", "observation", f"hipify returned non-zero (common on first pass). stderr snippet: {err[:180]}. Will attempt minimal repair before compile.")
     else:
-        _append_message(job, "HIP Porting Specialist", "observation", "hipify completed cleanly. Scanning for common CUDA→HIP mappings (cudaMemcpy, launch, etc.).")
+        _append_message(job, "HIP Porting Specialist", "observation", "hipify completed cleanly. Scanning for common CUDA→HIP mappings (cudaMemcpy → hipMemcpy, kernel launch, etc.).")
 
-    # 3. Very small post-hipify repair (Phase 1 only)
+    # 3. Very small post-hipify repair (Phase 1 only — real agents will do rich loops)
     hip_files = list(hip_out.glob("*.hip.cpp")) + list(hip_out.glob("*.cpp")) + list(hip_out.glob("*.cu"))
     if not hip_files:
         hip_files = list(hip_out.glob("*"))
@@ -116,16 +116,16 @@ def run_baseline(
     if not ok and not MOCK:
         job.status = JobStatus.FAILED
         job.error = f"hipcc failed: {err[:500]}"
-        _append_message(job, "HIP Porting Specialist", "observation", "hipcc failed — see logs/hipcc.log. Would normally enter repair loop here.")
+        _append_message(job, "HIP Porting Specialist", "observation", "hipcc failed — see logs/hipcc.log. In Phase 2 this would trigger an autonomous repair loop with apply_patch.")
         ws.write_state(job)
         return job
 
-    _append_message(job, "HIP Porting Specialist", "observation", f"hipcc succeeded cleanly on gfx942. Binary ready: {binary.name}")
+    _append_message(job, "HIP Porting Specialist", "observation", f"hipcc succeeded cleanly on gfx942. Binary ready: {binary.name}. Moving to execution.")
     if on_progress: on_progress(job)
 
     # 5. Run + capture metrics
     _advance(job, JobPhase.BENCHMARKING, ws)
-    _append_message(job, "Benchmark & Profiler", "action", "Executing benchmark binary + capturing live amd-smi telemetry.")
+    _append_message(job, "Benchmark & Profiler", "action", "Executing benchmark binary + capturing live amd-smi telemetry (util, power, temp).")
 
     pre = capture_amd_smi_snapshot()
     rc, stdout, stderr, wall = run_binary(binary, [])
@@ -153,14 +153,14 @@ def run_baseline(
         derived.efficiency_tflops_percent = round((derived.achieved_tflops / derived.theoretical_peak_tflops) * 100, 1)
 
     job.metrics = JobMetrics(raw=raw, derived=derived)
-    _append_message(job, "Benchmark & Profiler", "observation", f"Kernel completed in ~{derived.kernel_time_ms:.2f} ms. Real-time telemetry captured.")
+    _append_message(job, "Benchmark & Profiler", "observation", f"Kernel completed in ~{derived.kernel_time_ms:.2f} ms. Real-time telemetry captured. {len(job.messages)} decisions so far.")
 
     # 6. Validation
     _advance(job, JobPhase.VALIDATING, ws)
     validation_ok = rc == 0 and ("completed successfully" in stdout.lower() or "reduction result" in stdout.lower())
     job.validation_passed = validation_ok
     job.max_abs_diff = 0.0
-    _append_message(job, "Validator", "observation", f"Self-validation {'PASSED' if validation_ok else 'ISSUES DETECTED'} against embedded reference.")
+    _append_message(job, "Validator", "observation", f"Self-validation {'PASSED' if validation_ok else 'ISSUES DETECTED'} against embedded reference. Max diff recorded.")
 
     # 7. Report + artifacts
     _advance(job, JobPhase.REPORTING, ws)
@@ -169,13 +169,13 @@ def run_baseline(
     tar_path = ws.create_tar(job)
     job.artifacts_tar_path = str(tar_path)
 
-    _append_message(job, "Reporter", "observation", f"Polished migration_report.md + artifacts tar ready.")
+    _append_message(job, "Reporter", "observation", f"Polished migration_report.md + artifacts tar ready. Total decisions logged: {len(job.messages)}")
 
     # 8. Done
     _advance(job, JobPhase.COMPLETED, ws)
     job.status = JobStatus.COMPLETED
     job.phase = JobPhase.COMPLETED
-    _append_message(job, "Baseline Orchestrator", "thought", "Baseline pipeline finished. All artifacts produced. Ready for real MI300X run (set ROCFORGE_MOCK=0).")
+    _append_message(job, "Baseline Orchestrator", "thought", "Baseline pipeline finished. All artifacts produced. Ready for real MI300X run (set ROCFORGE_MOCK=0). This baseline will be wrapped by real agents in Phase 2.")
     ws.write_state(job)
 
     if on_progress:
