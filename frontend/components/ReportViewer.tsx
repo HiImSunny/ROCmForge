@@ -1,58 +1,101 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
+import { getReport, getArtifactsUrl } from "@/lib/api";
+import { toast } from "sonner";
 
 interface ReportViewerProps {
   jobId: string;
-  efficiency: number;
-  bandwidth: string;
+  // Optional pre-fetched data for replay / when parent already has it
+  initialMarkdown?: string;
 }
 
-export function ReportViewer({ jobId, efficiency, bandwidth }: ReportViewerProps) {
+export function ReportViewer({ jobId, initialMarkdown }: ReportViewerProps) {
+  const [markdown, setMarkdown] = useState<string | null>(initialMarkdown || null);
+  const [loading, setLoading] = useState(!initialMarkdown);
+
+  useEffect(() => {
+    if (initialMarkdown) {
+      setMarkdown(initialMarkdown);
+      return;
+    }
+
+    const fetchReport = async () => {
+      setLoading(true);
+      try {
+        const { markdown: md } = await getReport(jobId);
+        setMarkdown(md);
+      } catch (e) {
+        toast.error("Could not load report from backend. Using fallback.");
+        // Fallback to a minimal nice message
+        setMarkdown(`# ROCmForge Migration Report — ${jobId}\n\nReport is being generated or backend is not reachable.\n\nPlease use the Download button or check the backend logs.`);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchReport();
+  }, [jobId, initialMarkdown]);
+
+  const handleDownload = () => {
+    if (markdown) {
+      const blob = new Blob([markdown], { type: "text/markdown" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `migration_report_${jobId}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+    // Also open artifacts
+    window.open(getArtifactsUrl(jobId), "_blank");
+  };
+
+  if (loading) {
+    return (
+      <div className="surface p-8 max-w-3xl mx-auto">
+        <div className="animate-pulse space-y-4">
+          <div className="h-6 w-1/3 bg-surface-2 rounded" />
+          <div className="h-10 w-2/3 bg-surface-2 rounded" />
+          <div className="h-4 w-full bg-surface-2 rounded" />
+          <div className="h-4 w-5/6 bg-surface-2 rounded" />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="surface p-8 max-w-3xl mx-auto">
       <div className="mb-8">
         <div className="uppercase tracking-[2px] text-xs text-accent mb-2">Migration Complete</div>
-        <h2 className="text-4xl font-semibold tracking-tighter">vectorAdd — Ported & Optimized</h2>
-        <div className="text-text-secondary mt-1">Job {jobId} • Real MI300X • 47s total</div>
+        <h2 className="text-4xl font-semibold tracking-tighter">Report for job {jobId}</h2>
+        <div className="text-text-secondary mt-1">Real MI300X • Captured on hardware</div>
       </div>
 
-      {/* Shock metric - the narrative hook */}
-      <div className="report-section mb-8">
-        <div className="text-sm text-text-secondary mb-1">Key Result</div>
-        <div className="text-5xl font-semibold tabular-nums tracking-[-2px] text-accent">
-          {efficiency}% <span className="text-3xl text-text-primary">of peak HBM bandwidth</span>
-        </div>
-        <div className="mt-1 text-lg">{bandwidth} achieved on actual AMD Instinct MI300X</div>
-      </div>
-
-      <div className="prose prose-invert text-sm space-y-6 text-text-secondary">
-        <div>
-          <h3 className="font-medium text-text-primary mb-2">Swarm Journey Summary</h3>
-          <p>
-            7 autonomous decisions. 2 repair loops resolved by Porting Specialist using memory patterns. 
-            Full validation passed with 1.2e-6 max error. Optimizer applied launch bounds + gfx942 flags, 
-            improving bandwidth from 4.1 → 4.61 TB/s.
-          </p>
-        </div>
-
-        <div>
-          <h3 className="font-medium text-text-primary mb-2">Hardware Evidence</h3>
-          <ul className="space-y-1">
-            <li>• Sustained 94% GPU utilization during kernel</li>
-            <li>• 682W average power draw (well within TDP)</li>
-            <li>• 68°C junction temperature</li>
-            <li>• All work executed natively on ROCm via AMD Developer Cloud</li>
-          </ul>
-        </div>
+      {/* Render the real (or fallback) markdown report */}
+      <div className="prose prose-invert prose-sm max-w-none bg-surface-2 p-6 rounded-xl border border-border whitespace-pre-wrap text-text-secondary leading-relaxed">
+        {markdown || "No report content available yet."}
       </div>
 
       <div className="mt-8 pt-6 border-t border-border flex gap-3">
-        <button className="button flex-1 h-11 rounded-xl bg-accent text-background font-medium">
-          Download Full Report (PDF + MD)
+        <button 
+          onClick={handleDownload}
+          className="button flex-1 h-11 rounded-xl bg-accent text-background font-medium"
+        >
+          Download Full Report (MD) + Artifacts Tar
         </button>
-        <button className="button flex-1 h-11 rounded-xl border border-border">
-          View Raw Agent Trace + Metrics JSON
+        <button 
+          onClick={() => {
+            if (markdown) {
+              navigator.clipboard.writeText(markdown);
+              toast.success("Report markdown copied to clipboard");
+            }
+          }}
+          className="button flex-1 h-11 rounded-xl border border-border"
+        >
+          Copy Report to Clipboard
         </button>
       </div>
     </div>

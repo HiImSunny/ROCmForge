@@ -1,12 +1,55 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { RotateCcw } from "lucide-react";
 import { LiveJobView } from "@/components/LiveJobView";
 import { ReportViewer } from "@/components/ReportViewer";
 import { SeedCard } from "@/components/SeedCard";
 import { toast } from "sonner";
+
+function BackendStatus() {
+  const [status, setStatus] = useState<"checking" | "connected" | "mock">("checking");
+
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+        const res = await fetch(`${apiUrl}/health`, { signal: AbortSignal.timeout(1500) });
+        if (res.ok) {
+          setStatus("connected");
+        } else {
+          setStatus("mock");
+        }
+      } catch {
+        setStatus("mock");
+      }
+    };
+    check();
+    const id = setInterval(check, 15000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (status === "checking") {
+    return <div className="text-xs px-3 py-1 rounded-full bg-surface-2 border border-border text-text-secondary">Checking backend...</div>;
+  }
+
+  if (status === "connected") {
+    return (
+      <div className="text-xs px-3 py-1 rounded-full bg-accent/10 text-accent border border-accent/30 flex items-center gap-2">
+        <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+        Connected to backend (real MI300X path)
+      </div>
+    );
+  }
+
+  return (
+    <div className="text-xs px-3 py-1 rounded-full bg-warning/10 text-warning border border-warning/30 flex items-center gap-2">
+      <div className="w-1.5 h-1.5 rounded-full bg-warning" />
+      Local mock mode (no backend or ROCm)
+    </div>
+  );
+}
 
 const SEEDS = [
   {
@@ -99,10 +142,7 @@ export default function ROCmForgeDashboard() {
             </div>
           </div>
 
-          <div className="text-xs px-3 py-1 rounded-full bg-surface-2 border border-border flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
-            LIVE on AMD Developer Cloud MI300X
-          </div>
+          <BackendStatus />
         </div>
       </nav>
 
@@ -166,11 +206,7 @@ export default function ROCmForgeDashboard() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
             >
-              <ReportViewer 
-                jobId={activeJob} 
-                efficiency={87} 
-                bandwidth="4.61 TB/s" 
-              />
+              <ReportViewer jobId={activeJob} />
               <div className="text-center mt-8">
                 <button onClick={closeView} className="text-sm text-text-secondary hover:text-text-primary">
                   ← Back to dashboard

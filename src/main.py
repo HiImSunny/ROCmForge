@@ -76,6 +76,13 @@ async def health() -> HealthResponse:
     )
 
 
+@app.post("/admin/cleanup")
+async def admin_cleanup(max_age_hours: int = 12) -> dict:
+    """Light admin endpoint for the instance. Call manually or via cron if needed."""
+    cleaned = WS.cleanup_old_jobs(max_age_hours=max_age_hours)
+    return {"cleaned_jobs": cleaned, "max_age_hours": max_age_hours}
+
+
 @app.post("/jobs", response_model=JobResponse, status_code=202)
 async def create_job(req: CreateJobRequest, background: BackgroundTasks) -> JobResponse:
     job = JobState(seed_id=req.seed_id)

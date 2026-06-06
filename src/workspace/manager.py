@@ -84,3 +84,29 @@ class WorkspaceManager:
         # make_archive adds .tar.gz automatically
         final = Path(str(tar_path).replace(".tar.gz", "") + ".tar.gz")
         return final
+
+    def cleanup_old_jobs(self, max_age_hours: int = 24, max_jobs: int = 50) -> int:
+        """Light cleanup for the instance (keeps disk usage reasonable).
+        Call this on startup or via a maintenance endpoint.
+        """
+        import time
+        now = time.time()
+        count = 0
+
+        job_dirs = sorted(self.base.glob("job_*"), key=lambda p: p.stat().st_mtime, reverse=True)
+
+        for d in job_dirs[max_jobs:]:
+            try:
+                shutil.rmtree(d)
+                count += 1
+            except Exception:
+                pass
+
+        for d in job_dirs:
+            if now - d.stat().st_mtime > max_age_hours * 3600:
+                try:
+                    shutil.rmtree(d)
+                    count += 1
+                except Exception:
+                    pass
+        return count
