@@ -131,6 +131,7 @@ class JobResponse(BaseModel):
     messages: list[AgentMessage]
     metrics: JobMetrics
     completed_phases: list[JobPhase]
+    duration_seconds: float | None = None  # real wall time from creation to completion/now
 
 
 class HealthResponse(BaseModel):

@@ -18,6 +18,7 @@ export interface CreateJobResponse {
   }>;
   metrics: any;
   completed_phases: string[];
+  duration_seconds?: number | null;
 }
 
 // Simple retry with exponential backoff (good for unstable cloud instance connections)
