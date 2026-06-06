@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import { getReport, getArtifactsUrl } from "@/lib/api";
 import { toast } from "sonner";
 
@@ -74,9 +75,25 @@ export function ReportViewer({ jobId, initialMarkdown }: ReportViewerProps) {
         <div className="text-text-secondary mt-1">Real MI300X • Captured on hardware</div>
       </div>
 
-      {/* Render the real (or fallback) markdown report */}
-      <div className="prose prose-invert prose-sm max-w-none bg-surface-2 p-6 rounded-xl border border-border whitespace-pre-wrap text-text-secondary leading-relaxed">
-        {markdown || "No report content available yet."}
+      {/* Render the real (or fallback) markdown report beautifully */}
+      <div className="prose prose-invert prose-sm max-w-none bg-surface-2 p-6 rounded-xl border border-border text-text-secondary leading-relaxed">
+        {markdown ? (
+          <ReactMarkdown
+            components={{
+              code({ node, inline, className, children, ...props }) {
+                return (
+                  <code className={`${className} bg-surface px-1 py-0.5 rounded font-mono text-xs`} {...props}>
+                    {children}
+                  </code>
+                );
+              },
+            }}
+          >
+            {markdown}
+          </ReactMarkdown>
+        ) : (
+          "No report content available yet."
+        )}
       </div>
 
       <div className="mt-8 pt-6 border-t border-border flex gap-3">
