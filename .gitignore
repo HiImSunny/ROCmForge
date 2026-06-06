@@ -31,15 +31,26 @@ frontend/node_modules/
 frontend/.next/
 frontend/out/
 frontend/.env*.local
-*.log
+!frontend/lib/          # keep our API client source
+frontend/package-lock.json  # optional: you can remove this line if you want to commit lockfile
 
-# ROCmForge specific
+# Logs
+*.log
+logs/
+
+# ROCmForge specific - runtime artifacts (never commit these)
 jobs/
 *.tar.gz
 *.tar
-*.log
 .env
 .env.local
+.env.*.local
+
+# Python caches (make sure all are covered)
+**/__pycache__/
+**/*.py[cod]
+**/*.pyc
+**/.pytest_cache/
 
 # IDE
 .idea/
@@ -58,8 +69,8 @@ Thumbs.db
 *.mov
 !track/**/*  # allow evidence in track if small
 
-# Misc
-*.pyc
-.pytest_cache/
+# Misc / coverage
 .coverage
 htmlcov/
+.mypy_cache/
+.ruff_cache/
