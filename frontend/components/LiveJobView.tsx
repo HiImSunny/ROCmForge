@@ -142,6 +142,14 @@ export function LiveJobView({ jobId, isReplay, onClose }: LiveJobViewProps) {
         </button>
       </div>
 
+      {/* Better error display for hipify/hipcc failures */}
+      {jobData?.status === 'failed' && jobData?.error && (
+        <div className="bg-danger/10 border border-danger/30 text-danger px-4 py-3 rounded-xl text-sm">
+          <strong>Execution Error:</strong> {jobData.error}
+          <div className="text-xs mt-1 opacity-75">Check logs/ in the job workspace on the instance.</div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
         {/* Agent Feed - the "genuine agentic" proof */}
         <div className="xl:col-span-7">
