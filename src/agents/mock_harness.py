@@ -51,9 +51,13 @@ def run_mock_repair_loop(
     job_id: str | None = None,
 ) -> JobState:
     """
-    Runs a complete simulated repair loop using the actual ToolRegistry + Memory.
-    The failure is injected for demo purposes, but all tool calls and memory
-    retrieval are real.
+    Clean, polished demo harness for Phase 2 repair behavior.
+
+    - Sets up a realistic job workspace with a deliberately broken HIP file.
+    - Delegates to PortingSpecialistAgent.repair_with_memory() which contains
+      the actual diagnosis + memory + patching logic.
+    - All steps produce proper AgentMessage objects that will render in the
+      existing UI (AgentFeed + LiveJobView).
     """
     if job_id is None:
         job_id = f"mock_repair_{seed_id.lower()}"
@@ -62,29 +66,27 @@ def run_mock_repair_loop(
     job = JobState(seed_id=SeedId(seed_id))  # type: ignore[arg-type]
     job.job_id = job_id
 
-    # Ensure workspace exists and has the seed
     ws_dir = ws.create_workspace(job)
     seeds_root = Path(__file__).resolve().parents[2] / "seeds"
     ws.copy_seed(job, seeds_root)
 
-    # Create a fake hip_out with a "bad" translated file for the demo
+    # Prepare a "bad" post-hipify file that triggers a known memory pattern
     hip_out = ws_dir / "hip_out"
     hip_out.mkdir(exist_ok=True)
-    bad_source = hip_out / "vectorAdd.hip.cpp"
-    bad_source.write_text(
-        "// Simulated output from hipify\n"
+    (hip_out / "vectorAdd.hip.cpp").write_text(
+        "// Intentionally left with classic CUDA launch syntax after hipify\n"
         "void vectorAdd(...) {\n"
         "    cudaLaunchKernel<<<grid, block>>>(vectorAdd, grid, block, 0, 0, args);\n"
         "}\n",
         encoding="utf-8"
     )
 
-    # Also create a logs dir with a fake hipcc error
-    logs_dir = ws_dir / "logs"
-    logs_dir.mkdir(exist_ok=True)
-    (logs_dir / "hipcc.log").write_text(
+    # Seed a realistic compiler error log
+    logs = ws_dir / "logs"
+    logs.mkdir(exist_ok=True)
+    (logs / "hipcc.log").write_text(
         "hipcc: error: unknown identifier 'cudaLaunchKernel'\n"
-        "    cudaLaunchKernel<<<grid, block>>>(...)\n"
+        "    cudaLaunchKernel<<<grid, block>>>(...);\n"
         "    ^\n"
         "1 error generated when compiling for gfx942\n",
         encoding="utf-8"
@@ -93,86 +95,40 @@ def run_mock_repair_loop(
     registry = create_tool_registry(job_id, ws, seeds_root)
     memory = get_memory()
 
-    agent_name = "Porting Specialist (Mock)"
+    # Create the specialist that now holds the real logic
+    from src.agents.base import PortingSpecialistAgent
+    specialist = PortingSpecialistAgent("Porting Specialist", job, registry, memory)
 
-    _append_message(job, "Orchestrator", "thought", f"Delegating to Porting Specialist for repair loop on {seed_id}")
+    _append_message(job, "Orchestrator", "thought", f"Starting autonomous repair for seed {seed_id} on mock MI300X")
 
-    # === Real agent-like flow ===
+    # === Call the real logic ===
+    result = specialist.repair_with_memory(max_loops=3)
 
-    _append_message(job, agent_name, "action", "Running hipify-clang...")
-    hipify_res = registry.execute("run_hipify")
-    _append_message(job, agent_name, "observation", f"hipify completed (mock). hip_out populated.")
-
-    _append_message(job, agent_name, "action", "First hipcc compile attempt (O3 + gfx942)...")
-    # We deliberately call with the "bad" source list to trigger our simulated failure path
-    compile1 = registry.execute("run_hipcc", sources=["vectorAdd.hip.cpp"])
-
-    # Inject a realistic failure for the demo (the real tool would have succeeded in pure MOCK)
-    compile1 = {
-        "success": False,
-        "error": "error: unknown identifier 'cudaLaunchKernel'\n    cudaLaunchKernel<<<grid, block>>>(...);",
-        "log": "hipcc failed with kernel launch syntax error",
-    }
-    _append_message(job, agent_name, "observation", f"hipcc FAILED on first attempt. Error: {compile1['error'][:80]}...")
-
-    # Agent reads the evidence
-    _append_message(job, agent_name, "action", "Reading hipcc.log and the generated HIP source to understand the failure...")
-    error_log = registry.execute("read_file", relative_path="logs/hipcc.log")
-    source = registry.execute("read_file", relative_path="hip_out/vectorAdd.hip.cpp")
-
-    _append_message(job, agent_name, "thought", "Classic CUDA launch syntax not fully translated by hipify. This matches a known pattern in memory.")
-
-    # Retrieve from memory (real call)
-    patterns = memory.get_relevant_patterns("hipcc failed with unknown identifier cudaLaunchKernel")
-    mem_context = memory.format_for_prompt(patterns)
-    _append_message(job, agent_name, "observation", f"Memory returned {len(patterns)} relevant pattern(s).")
-
-    # Apply the fix using the real apply_search_replace tool
-    _append_message(job, agent_name, "action", "Applying targeted search-replace based on memory pattern...")
-    patch_res = registry.execute(
-        "apply_search_replace",
-        relative_path="hip_out/vectorAdd.hip.cpp",
-        old_text="cudaLaunchKernel<<<grid, block>>>(vectorAdd, grid, block, 0, 0, args);",
-        new_text="hipLaunchKernel(grid, block, 0, 0, vectorAdd, args);  // repaired using stored porting pattern",
+    _append_message(
+        job, "Orchestrator", "thought",
+        f"Repair loop completed. Final status: {result.get('status')} after {result.get('attempts', '?')} attempts"
     )
-
-    if patch_res.get("success"):
-        _append_message(job, agent_name, "observation", "Patch applied successfully.")
-    else:
-        _append_message(job, agent_name, "observation", f"Patch result: {patch_res}")
-
-    # Retry compile
-    _append_message(job, agent_name, "action", "Re-attempting hipcc after the repair...")
-    compile2 = registry.execute("run_hipcc", sources=["vectorAdd.hip.cpp"])
-
-    if compile2.get("success"):
-        _append_message(job, agent_name, "observation", "hipcc succeeded on second attempt. Binary is ready.")
-        _append_message(job, "Orchestrator", "thought", "Repair loop completed successfully. Proceeding to validation.")
-    else:
-        _append_message(job, agent_name, "observation", f"Second compile still had issues: {compile2.get('error')}")
-
-    # Final benchmark (uses the real tool)
-    _append_message(job, "Benchmark & Profiler", "action", "Running the repaired binary + capturing metrics...")
-    bench = registry.execute("run_benchmark")
-    _append_message(job, "Benchmark & Profiler", "observation", f"Benchmark finished. wall_time={bench.get('wall_time_seconds')}s")
-
-    _append_message(job, agent_name, "thought", "Mock repair demonstration complete. In production this entire loop would be driven by an LLM calling the same tools.")
 
     return job
 
 
 if __name__ == "__main__":
     print("=" * 72)
-    print("ROCmForge — Mock Phase 2 Repair Loop (using real ToolRegistry + Memory)")
+    print("ROCmForge — Phase 2 Mock Repair Loop Demo")
     print("=" * 72)
-    print("This demonstrates exactly how a Porting Specialist agent will behave.\n")
+    print("This harness runs the *real* repair logic living in PortingSpecialistAgent")
+    print("using the actual ToolRegistry + Memory (no LLM yet).\n")
 
     job = run_mock_repair_loop()
 
-    print("\n--- Last agent decisions (this is what the UI AgentFeed will show) ---")
-    for msg in job.messages[-10:]:
-        print(f"[{msg.timestamp}] {msg.agent}: {msg.content[:95]}")
+    print("\n" + "=" * 72)
+    print("AGENT TRACE (this is what will appear in the Live UI AgentFeed)")
+    print("=" * 72)
+    for msg in job.messages:
+        prefix = "💭" if msg.type == "thought" else ("🔧" if msg.type == "action" else "👁")
+        print(f"{prefix} [{msg.timestamp}] {msg.agent}: {msg.content}")
 
-    print("\n✅ Demonstration finished. The repair loop used actual tool calls and memory retrieval.")
-    print("   When we have real hardware + vLLM, we will replace the decision logic with LLM calls.")
+    print("\n✅ Harness complete.")
+    print("   The job object now contains a full realistic repair trace.")
+    print("   In production this trace will be produced by an LLM calling the same tools.")
     print("=" * 72)
