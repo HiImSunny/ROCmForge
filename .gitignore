@@ -1,0 +1,65 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Node / Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env*.local
+*.log
+
+# ROCmForge specific
+jobs/
+*.tar.gz
+*.tar
+*.log
+.env
+.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Hackathon artifacts (keep in track/ but ignore large binaries)
+*.png
+*.jpg
+*.mp4
+*.mov
+!track/**/*  # allow evidence in track if small
+
+# Misc
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
