@@ -194,12 +194,19 @@ def generate_minimal_report(job: JobState, ws_dir: Path, run_stdout: str) -> Pat
     eff = d.efficiency_percent or d.efficiency_tflops_percent or 0.0
     peak_note = "5.3 TB/s HBM3" if job.seed_id.value == "vectorAdd" else "163+ TFLOPS FP32"
 
+    duration = "N/A"
+    if job.updated_at and job.created_at:
+        secs = (job.updated_at - job.created_at).total_seconds()
+        duration = f"{secs:.1f}s"
+
     content = f"""# ROCmForge Migration Report — {job.seed_id.value}
 
 **Job ID**: {job.job_id}  
 **Date**: {job.created_at.isoformat()}  
 **Hardware**: AMD Instinct MI300X (gfx942) via AMD Developer Cloud + ROCm (see amd-smi)  
-**Mode**: {"MOCK (local dev)" if MOCK else "REAL MI300X"}
+**Mode**: {"MOCK (local dev)" if MOCK else "REAL MI300X"}  
+**Total Duration**: {duration}  
+**Messages / Decisions**: {len(job.messages)}
 
 ## Executive Summary
 Baseline (non-agent) port of {job.seed_id.value} completed in {d.kernel_time_ms:.1f} ms.

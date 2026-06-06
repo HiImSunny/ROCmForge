@@ -7,6 +7,7 @@ import { LiveJobView } from "@/components/LiveJobView";
 import { ReportViewer } from "@/components/ReportViewer";
 import { SeedCard } from "@/components/SeedCard";
 import { toast } from "sonner";
+import { listJobs } from "@/lib/api";
 
 function BackendStatus() {
   const [status, setStatus] = useState<"checking" | "connected" | "mock">("checking");
@@ -126,6 +127,31 @@ export default function ROCmForgeDashboard() {
     setShowReport(true);
   };
 
+  // Simple recent jobs component (polish)
+  function RecentJobs({ onSelectJob }: { onSelectJob: (jobId: string) => void }) {
+    const [jobs, setJobs] = useState<any[]>([]);
+    useEffect(() => {
+      listJobs(5).then(setJobs).catch(() => {});
+    }, []);
+    if (!jobs.length) return null;
+    return (
+      <div className="pt-8 border-t border-border text-xs">
+        <div className="text-text-secondary mb-2">Recent local jobs (demo)</div>
+        <div className="flex gap-2 flex-wrap">
+          {jobs.map((j) => (
+            <button
+              key={j.job_id}
+              onClick={() => onSelectJob(j.job_id)}
+              className="px-3 py-1 rounded border border-border hover:bg-surface-2"
+            >
+              {j.seed_id} • {j.phase}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background text-text-primary">
       <nav className="border-b border-border bg-surface/80 backdrop-blur-md sticky top-0 z-50">
@@ -193,6 +219,10 @@ export default function ROCmForgeDashboard() {
                     />
                   ))}
                 </div>
+              </div>
+
+              {/* Small recent jobs history for polish / debugging */}
+              <RecentJobs onSelectJob={(jid) => { setActiveJob(jid); setShowReport(false); setIsReplaying(false); }} />
               </div>
 
               <div className="pt-10 text-xs text-text-secondary max-w-prose border-t border-border">
