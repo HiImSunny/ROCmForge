@@ -52,16 +52,26 @@ export function LiveJobView({ jobId, isReplay, onClose }: LiveJobViewProps) {
     // Initial fetch
     fetchStatus();
 
-    // Try real SSE
+    // Try real SSE (improved backend sends "update" events with full snapshot)
     try {
-      es = new EventSource(getStreamUrlFromJobId(jobId)); // defined below
-      es.onmessage = (event) => {
-        // The backend sends "event: phase" and "event: message"
-        // For simplicity we just poll on any message
-        fetchStatus();
-      };
+      es = new EventSource(getStreamUrlFromJobId(jobId));
+      es.addEventListener('update', (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          setJobData({
+            seed_id: data.seed_id,
+            phase: data.phase,
+            status: data.status,
+            messages: data.messages,
+            metrics: data.metrics,
+            completed_phases: data.completed_phases,
+          });
+        } catch {}
+      });
+      es.addEventListener('done', () => {
+        fetchStatus(); // final sync
+      });
       es.onerror = () => {
-        // Fall back to polling if SSE fails
         if (es) es.close();
         es = null;
       };

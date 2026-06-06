@@ -105,32 +105,81 @@ async def get_status(job_id: str) -> JobResponse:
 
 @app.get("/jobs/{job_id}/stream")
 async def stream_job(job_id: str) -> StreamingResponse:
-    """SSE stub. In Phase 1 we poll state and emit phase + last few messages.
-    Real implementation will push from the running pipeline.
+    """Improved SSE for Phase 1.
+    Sends structured updates: full job snapshot on changes + periodic heartbeat.
+    Frontend (EventSource) can listen to 'update' events.
     """
     async def event_generator() -> AsyncGenerator[str, None]:
-        last_len = 0
-        for _ in range(120):  # ~2 minutes of updates
+        last_message_count = 0
+        last_phase = None
+        last_status = None
+
+        for _ in range(180):  # ~3 minutes
             job = JOBS.get(job_id) or WS.load_state(job_id)
             if not job:
-                yield "event: error\ndata: job not found\n\n"
+                yield "event: error\ndata: {\"error\": \"job not found\"}\n\n"
                 break
 
-            # Send phase update
-            yield f"event: phase\ndata: {job.phase.value}\n\n"
+            current_phase = job.phase.value
+            current_status = job.status.value
+            msg_count = len(job.messages)
 
-            # Send new messages
-            for msg in job.messages[last_len:]:
-                yield f"event: message\ndata: {msg.model_dump_json()}\n\n"
-            last_len = len(job.messages)
+            # Send update when something meaningful changed
+            if (current_phase != last_phase or
+                current_status != last_status or
+                msg_count != last_message_count):
+
+                payload = {
+                    "job_id": job.job_id,
+                    "seed_id": job.seed_id.value,
+                    "phase": current_phase,
+                    "status": current_status,
+                    "messages": [m.model_dump() for m in job.messages],
+                    "metrics": job.metrics.model_dump(),
+                    "completed_phases": [p.value for p in job.completed_phases],
+                }
+                import json
+                yield f"event: update\ndata: {json.dumps(payload)}\n\n"
+
+                last_phase = current_phase
+                last_status = current_status
+                last_message_count = msg_count
 
             if job.status in (JobStatus.COMPLETED, JobStatus.FAILED):
-                yield f"event: done\ndata: {job.status.value}\n\n"
+                yield f"event: done\ndata: {current_status}\n\n"
                 break
 
-            await asyncio.sleep(0.8)
+            await asyncio.sleep(0.7)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.get("/jobs")
+async def list_jobs(limit: int = 20) -> list[dict]:
+    """List recent jobs (useful for UI or debugging)."""
+    all_jobs = list(JOBS.values())
+    # Also load any on-disk ones not in memory (simple scan)
+    for p in WS.base.glob("job_*/state.json"):
+        try:
+            jid = p.parent.name
+            if jid not in JOBS:
+                st = WS.load_state(jid)
+                if st:
+                    all_jobs.append(st)
+        except Exception:
+            pass
+
+    all_jobs.sort(key=lambda j: j.created_at, reverse=True)
+    return [
+        {
+            "job_id": j.job_id,
+            "seed_id": j.seed_id.value,
+            "phase": j.phase.value,
+            "status": j.status.value,
+            "created_at": j.created_at.isoformat(),
+        }
+        for j in all_jobs[:limit]
+    ]
 
 
 @app.get("/jobs/{job_id}/report")
