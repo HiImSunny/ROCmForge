@@ -1,0 +1,36 @@
+# Dockerfile for ROCmForge backend (Phase 1+)
+# Build and run this on the AMD MI300X instance.
+#
+# On the instance you will typically do:
+#   docker build -f Dockerfile.backend -t rocmforge-backend .
+#   docker run --rm -it \
+#     --device=/dev/kfd --device=/dev/dri --group-add video \
+#     -p 8000:8000 \
+#     -e ROCFORGE_MOCK=0 \
+#     rocmforge-backend
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# System deps (rocminfo etc. will come from the host ROCm stack when running with devices)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY src ./src
+COPY seeds ./seeds
+COPY scripts ./scripts
+
+# The backend expects to be able to call hipify/hipcc/amd-smi from PATH
+# When running on real MI300X container with device passthrough, they will be available.
+
+EXPOSE 8000
+
+ENV PYTHONUNBUFFERED=1
+ENV ROCFORGE_MOCK=0
+
+CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
