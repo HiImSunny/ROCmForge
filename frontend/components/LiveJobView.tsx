@@ -128,7 +128,10 @@ export function LiveJobView({ jobId, isReplay, onClose }: LiveJobViewProps) {
             <div className="font-mono text-sm text-text-secondary">{jobId}</div>
           </div>
           <h2 className="text-3xl font-semibold tracking-tighter mt-1">{seedName} seed</h2>
-          <p className="text-text-secondary text-sm mt-1">Autonomous port + benchmark on AMD Instinct MI300X</p>
+          <p className="text-text-secondary text-sm mt-1">
+            Autonomous port + benchmark on AMD Instinct MI300X
+            {jobData?.duration_seconds ? ` • ${(jobData.duration_seconds / 60).toFixed(1)} min` : ''}
+          </p>
         </div>
 
         <button 
