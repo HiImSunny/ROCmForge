@@ -131,7 +131,8 @@ class JobResponse(BaseModel):
     messages: list[AgentMessage]
     metrics: JobMetrics
     completed_phases: list[JobPhase]
-    duration_seconds: float | None = None  # real wall time from creation to completion/now
+    duration_seconds: float | None = None
+    error: Optional[str] = None  # surfaced for UI error banners on hipify/hipcc/run failures
 
 
 class HealthResponse(BaseModel):

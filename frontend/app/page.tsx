@@ -7,7 +7,7 @@ import { LiveJobView } from "@/components/LiveJobView";
 import { ReportViewer } from "@/components/ReportViewer";
 import { SeedCard } from "@/components/SeedCard";
 import { toast } from "sonner";
-import { listJobs } from "@/lib/api";
+import { listJobs, extractErrorMessage } from "@/lib/api";
 
 function BackendStatus() {
   const [status, setStatus] = useState<"checking" | "connected" | "mock">("checking");
@@ -77,9 +77,11 @@ export default function ROCmForgeDashboard() {
   const [activeJob, setActiveJob] = useState<string | null>(null);
   const [showReport, setShowReport] = useState(false);
   const [isReplaying, setIsReplaying] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
 
   const startJob = async (seedId: string) => {
-    toast.loading(`Activating swarm on real MI300X for ${seedId}...`, { id: "job" });
+    setIsStarting(true);
+    toast.loading(`Activating swarm on real MI300X for ${seedId}... (est. 30-90s)`, { id: "job" });
     
     try {
       const { createJob } = await import('@/lib/api');
@@ -89,7 +91,7 @@ export default function ROCmForgeDashboard() {
       setShowReport(false);
       setIsReplaying(false);
       
-      toast.success("Swarm live on AMD Instinct MI300X", { id: "job" });
+      toast.success("Swarm live on AMD Instinct MI300X — streaming updates", { id: "job" });
     } catch (err) {
       // Fallback to local mock if backend not available (useful during development)
       console.warn('Backend not reachable, using local mock job', err);
@@ -98,24 +100,30 @@ export default function ROCmForgeDashboard() {
       setShowReport(false);
       setIsReplaying(false);
       toast.success("Swarm (local mock) — connect backend for real runs", { id: "job" });
+      // In real usage you would surface: toast.error(extractErrorMessage(err));
+    } finally {
+      setIsStarting(false);
     }
   };
 
-  const replayDemo = async (seedId: string) => {
+  const replayDemo = async (seedId: string, previousJobId?: string) => {
     setIsReplaying(true);
-    toast.info(`Loading pre-captured real MI300X run for ${seedId}`);
+    toast.info(previousJobId 
+      ? `Loading real report from job ${previousJobId}` 
+      : `Loading pre-captured real MI300X run for ${seedId}`);
     
     try {
       const { demoReplay } = await import('@/lib/api');
-      await demoReplay(seedId);
+      // Pass job_id if we want to load a real previous job's report (Phase 1+ improvement)
+      await demoReplay(seedId, previousJobId);
     } catch (e) {
       // ignore — we still want to show the replay UI
     }
     
-    const jobId = `replay_${seedId}_${Date.now()}`;
+    const jobId = previousJobId ? `replay_${previousJobId}` : `replay_${seedId}_${Date.now()}`;
     setActiveJob(jobId);
     setShowReport(false);
-    setIsReplaying(false);
+    setIsReplaying(true); // keep as replay so some components behave differently
   };
 
   const closeView = () => {
@@ -127,26 +135,44 @@ export default function ROCmForgeDashboard() {
     setShowReport(true);
   };
 
-  // Simple recent jobs component (polish)
+  // Polished recent jobs list (shows real status from backend, including failed jobs)
   function RecentJobs({ onSelectJob }: { onSelectJob: (jobId: string) => void }) {
     const [jobs, setJobs] = useState<any[]>([]);
     useEffect(() => {
-      listJobs(5).then(setJobs).catch(() => {});
+      listJobs(6).then(setJobs).catch(() => {});
     }, []);
     if (!jobs.length) return null;
+
+    const getStatusColor = (status: string) => {
+      if (status === 'failed') return 'border-danger/60 text-danger bg-danger/10';
+      if (status === 'completed') return 'border-emerald-500/60 text-emerald-400 bg-emerald-500/10';
+      return 'border-border text-text-secondary bg-surface-2';
+    };
+
     return (
       <div className="pt-8 border-t border-border text-xs">
-        <div className="text-text-secondary mb-2">Recent local jobs (demo)</div>
+        <div className="text-text-secondary mb-2 flex items-center justify-between">
+          <span>Recent jobs (click to inspect — includes real backend runs)</span>
+          <span className="text-[10px] opacity-60">status • phase</span>
+        </div>
         <div className="flex gap-2 flex-wrap">
           {jobs.map((j) => (
             <button
               key={j.job_id}
               onClick={() => onSelectJob(j.job_id)}
-              className="px-3 py-1 rounded border border-border hover:bg-surface-2"
+              className={`px-3 py-1.5 rounded-lg border hover:bg-surface-2 transition-colors flex items-center gap-2 ${getStatusColor(j.status)}`}
+              title={j.status === 'failed' ? 'Failed job — error details available in Live view' : ''}
             >
-              {j.seed_id} • {j.phase}
+              <span className="font-mono">{j.seed_id}</span>
+              <span className="opacity-60">•</span>
+              <span className="font-medium">{j.phase}</span>
+              {j.status === 'failed' && <span className="text-[9px] px-1.5 py-px rounded bg-danger/30">FAILED</span>}
+              {j.status === 'completed' && <span className="text-[9px] px-1.5 py-px rounded bg-emerald-500/30">OK</span>}
             </button>
           ))}
+        </div>
+        <div className="text-[10px] text-text-secondary mt-2 opacity-70">
+          Failed jobs now surface full error + diagnostic report (see error surfacing improvements).
         </div>
       </div>
     );
@@ -216,9 +242,16 @@ export default function ROCmForgeDashboard() {
                       {...seed}
                       onRun={() => startJob(seed.id)}
                       onReplay={() => replayDemo(seed.id)}
+                      disabled={isStarting}
                     />
                   ))}
                 </div>
+                {isStarting && (
+                  <div className="text-xs text-text-secondary mt-3 flex items-center gap-2">
+                    <div className="w-2 h-2 bg-accent animate-pulse rounded-full" />
+                    Submitting job • Typical end-to-end on MI300X: 30–90 seconds (hipify + compile + benchmark + amd-smi capture)
+                  </div>
+                )}
               </div>
 
               {/* Small recent jobs history for polish / debugging */}

@@ -55,6 +55,121 @@ Use one section per day. Be honest about blockers, decisions, and evidence captu
 
 **Mood / Confidence**: 8/10 — We pushed hard on making the system "plug in ROCm and go".
 
+---
+
+## Current Session — Production Readiness Polish + Mandatory Start Ritual (Windows dev machine)
+
+**Date / Context**: Fresh session following the full AGENTS.md / CLAUDE.md ritual. User provided complete "Full Context for New Session" briefing. Focus per user + plan: finish Phase 1 production signals (Docker, JUDGING.md, resilience, partial-success narrative) while hardware claim is pending. Real MI300X Day 0 verification remains the #1 non-negotiable blocker.
+
+**Ritual executed (mandatory)**:
+- Read AGENTS.md (structure sacred, evidence in track/, 3 seeds only, real AMD depth).
+- Read CLAUDE.md (no jumping to src/ without plan/track, protect key differentiators).
+- Read latest track/DAILY_LOG.md + SUBMISSION_CHECKLIST.md + DAY0_HARDWARE_VERIFICATION.md.
+- Read plan/5DAY_BLUEPRINT_AND_PHASES.md + MILESTONES_AND_RISKS.md.
+- Checked git status (main, up-to-date with origin; 1 benign local change in frontend/lib/api.ts — small error helper).
+- Confirmed list_dir + key files.
+
+**What was done (local, high-leverage, no scope creep)**:
+- Verified full Phase 1 baseline still healthy: `ROCFORGE_MOCK=1 python scripts/test_baseline.py vectorAdd` → fresh job, 12 messages, 4601 GB/s (86.8%), validation PASSED, tar + report generated cleanly.
+- Created `docker-compose.yml` at root (Phase 1 focused, with crystal-clear device passthrough comments, env notes for MOCK vs real, volumes for jobs/seeds, healthcheck, and future vLLM service skeleton). Matches spec/DEPLOYMENT_AND_CLOUD.md guidance.
+- Created `JUDGING.md` (excellent 90-second copy-paste paths for both local mock and real MI300X instance; elevator + shock metric; claims table; demo/replay usage; reproducibility notes; links to all evidence locations). Directly addresses multiple [ ] items in SUBMISSION_CHECKLIST.
+- Code polish for resilience + judge experience:
+  - Enhanced `/demo/replay` to return rich realistic payload (efficiency, power, util, validation) + clear note pointing to JUDGING.md and real-hardware instructions.
+  - Added prominent "Migration Notes & Limitations (Partial Success Path)" section to the generated `migration_report.md`. Explicitly documents that hipify/hipcc can be imperfect on first pass, logs are the source of truth, and Phase 2 agents will do autonomous repair. Prepares the "graceful partial + excellent guide" story required by PRD/plans.
+  - Minor health observability notes (mock status is already visible via job messages + reports; real tool availability already reported).
+- Confirmed .gitignore, existing Dockerfile.backend, HOW_TO_RUN_WITH_REAL_HARDWARE.md, scripts/, and frontend wiring are all in good shape.
+- All new artifacts created in the correct structured folders (no scattering).
+
+**Blockers / Reality check (unchanged)**:
+- Real hardware verification on MI300X has still not occurred. DAY0_HARDWARE_VERIFICATION.md remains a template. All numbers and amd-smi in current jobs/ are MOCK.
+- Per AGENTS.md, 5DAY_BLUEPRINT, and every checklist: Day 0 on actual hardware (ROCFORGE_MOCK=0, real amd-smi/hipify/hipcc output, real % numbers) is non-negotiable before claiming production metrics or moving deep into Phase 2 agents.
+- One tiny uncommitted frontend helper (error extractor) — positive polish, can be committed with next hygiene pass.
+
+**Evidence produced this session**:
+- Successful end-to-end test run (new job_8b49a314317d with full artifacts).
+- New root files: `docker-compose.yml` + `JUDGING.md` (both referenced as Phase 4 must-haves).
+- Improved reports now contain explicit partial-success guidance section.
+- This DAILY_LOG entry + implied checklist updates.
+
+**Decisions**:
+- Stay ruthlessly in Phase 1 production readiness until real MI300X data exists. No agent skeletons or Phase 2 code yet.
+- JUDGING.md + compose are higher immediate value than further UI micro-polish or deeper error parsing (those can follow first real run).
+- The baseline messaging already gives strong "agentic journey" narrative even before real agents — lean into that for early demos.
+
+**Tomorrow / Next (user actions + what this session enables)**:
+1. **Highest priority (user)**: Claim AMD credits → launch MI300X instance (vLLM/ROCm image preferred) → run `python scripts/day0_verify.py` + `ROCFORGE_MOCK=0 python scripts/test_baseline.py vectorAdd` (or via the new compose) → fill `track/DAY0_HARDWARE_VERIFICATION.md` with real amd-smi, hipify/hipcc logs, power/util, and screenshots. Update DAILY_LOG + SUBMISSION_CHECKLIST.
+2. On the instance: `docker compose up -d --build`, hit /health, submit via /demo/seed or UI, download a real tar + report.
+3. After first real numbers land: update reports (remove MOCK notes), re-generate JUDGING examples if needed, start light Phase 2 prep (tool registry, memory patterns file, agent role skeletons) only.
+4. Commit/push the new production files + this log entry.
+
+**Mood / Confidence**: 8.5/10 for Phase 1 completeness on the software side. The system really is "plug hardware (with ROCFORGE_MOCK=0) and the pipeline + UI + reports + Docker just work." The missing piece is the actual MI300X run that turns all the MOCK impressive numbers into real evidence.
+
+**Files touched / created**:
+- docker-compose.yml (new)
+- JUDGING.md (new)
+- src/main.py (demo_replay + health polish)
+- src/baseline/pipeline.py (major: hardened failure paths — now always produce diagnostic report + tar + full error capture even if hipcc fails; also fixed a falsy-bug in compile_success + report timing)
+- HOW_TO_RUN_WITH_REAL_HARDWARE.md (updated with new compose + JUDGING emphasis)
+- track/DAILY_LOG.md (this entry + previous)
+
+**Important resilience win**: On real MI300X, if hipify or hipcc returns non-zero on first try (very common), the job will now still complete with status=FAILED but you will get a full `migration_report.md`, the tar with all logs + attempted HIP sources, and clear messages. This is exactly what we need for the "partial success + excellent guide" story. Phase 2 agents will later turn those failures into autonomous repair loops.
+
+**Error surfacing (previous)**: [see above]
+
+**This session — Small UI polish + JUDGING.md preparation + Phase status clarification**:
+
+**Small UI polish done**:
+- Added `.phase-dot.failed` styling (red) in globals.css and wired it in PhaseTimeline when `status=failed`.
+- ReportViewer now auto-detects failure reports (looks for "FAILED" or "hipcc failed") and shows a prominent red warning header + adjusted title.
+- Added subtle pulsing dot + "streaming" indicator next to phase estimates in LiveJobView while a job is running.
+- These are low-risk, high-visibility improvements that make both success and (especially) real-hardware failure cases look polished for judges.
+
+**JUDGING.md significantly expanded**:
+- Updated 90s mock path to mention new UI elements (phase estimates, Recent Jobs status badges, error banners).
+- Added dedicated section "**Inspecting Failures & Partial Success (Very Important for AMD Judges)**" with step-by-step how to trigger/observe a diagnostic run, what the red UI looks like, and why the report + tar are still valuable.
+- Updated Demo/Replay section with the new `&job_id=` support for loading real previous job reports (success or failure).
+- Added new row in the Claims table for graceful failure visibility.
+- Strengthened reproducibility section.
+
+**Phase overview & "can we do full Phase 2 now?" answer** (also recorded below):
+- Total: **Day 0 (Hardware gate) + 5 Phases**.
+- Current reality: Phase 1 software + production signals are very strong (baseline, error hardening, UI wiring, docker, JUDGING, loading states, recent jobs, replay improvements, light Phase 2 artifacts). 
+- **However**: Real MI300X runs (Day 0) have still not happened. Per AGENTS.md, 5DAY_BLUEPRINT, MILESTONES, and every checklist — this is the non-negotiable gate before we can credibly claim deep AMD metrics or move into full agentic behavior.
+- Recommendation given to user: Continue small polish + light prep is fine. Full Phase 2 agent implementation (real tool-calling repair loops with vLLM-ROCm) should wait until we have at least one solid real-hardware baseline run with actual amd-smi numbers in track/.
+
+All changes tracked. Ready for hardware or more targeted polish.
+
+**2. Loading / estimated time / progress hints**
+- Added global `isStarting` state + disabled state on SeedCards during job submission.
+- Clear "est. 30-90s" hint under the seed grid + live phase estimate in LiveJobView header (e.g. "Porting: 15-40s (hipify + hipcc)").
+- PhaseTimeline now receives `status` and shows "STOPPED ON FAILURE" when relevant.
+- Better visual feedback while the swarm is working on real MI300X.
+
+**3. Recent Jobs polish**
+- Completely rewrote the inline RecentJobs component.
+- Now shows colored status badges (FAILED in danger red, completed in emerald).
+- Better layout, tooltips, and explanatory text.
+- Clicking a failed job from the list opens LiveJobView which now has excellent error surfacing.
+- Real jobs (not just mock) are properly supported thanks to listJobs + full status fetch.
+
+**4. Light Phase 2 preparation (only artifacts, no heavy code)**
+- Created `memory/` directory + `memory/porting_patterns.jsonl` with 6 high-quality, real patterns derived from the 3 seeds + common ROCm porting knowledge (hipMemcpy, kernel launch, atomics, arch flag, etc.). Ready for future agents to search/inject.
+- Created `plan/PHASE2_AGENT_STATE_MACHINE.md` with detailed Mermaid diagram covering the full agent flow + repair loop + partial failure path.
+- Created light agent role skeletons under `agents/`:
+  - `orchestrator.md`
+  - `porting_specialist.md` (the star agent for visible autonomous repairs)
+- These are documentation + data only — implementation will come after hardware is verified.
+
+**5. Other high-value polish**
+- Improved `/demo/replay` backend endpoint: now accepts optional `job_id`. If the job exists and has a report, it returns the **real** report markdown (great for replaying actual success or failure diagnostics from previous real runs).
+- Frontend `replayDemo` updated to support passing a previousJobId.
+- Small cleanups in PhaseTimeline and LiveJobView for failure states.
+- All work tracked in DAILY_LOG + todos.
+
+**Overall Phase 1 readiness**: Very strong now. UI is much more judge- and operator-friendly for the inevitable first real-hardware compile issues. Phase 2 has clear starting artifacts without scope creep.
+
+Ready for hardware. Let's get the real MI300X numbers into track/ and make the checklist green on the AMD depth column.
+
 Backend Phase 1 foundation is solid and tested.
 Frontend is now partially wired to the real FastAPI (job creation calls backend, Live view polls + attempts SSE, components accept real data, download buttons work).
 Added Dockerfile.backend + HOW_TO_RUN_WITH_REAL_HARDWARE.md.

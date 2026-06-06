@@ -10,9 +10,10 @@ interface SeedCardProps {
   target: string;
   onRun: () => void;
   onReplay: () => void;
+  disabled?: boolean;
 }
 
-export function SeedCard({ name, description, target, onRun, onReplay }: SeedCardProps) {
+export function SeedCard({ name, description, target, onRun, onReplay, disabled = false }: SeedCardProps) {
   return (
     <motion.div
       whileHover={{ y: -2 }}
@@ -29,14 +30,16 @@ export function SeedCard({ name, description, target, onRun, onReplay }: SeedCar
       <div className="flex gap-2 mt-6">
         <button
           onClick={onRun}
-          className="button flex-1 flex items-center justify-center gap-2 bg-accent text-background py-2.5 rounded-xl font-medium text-sm active:scale-[0.985] transition-all"
+          disabled={disabled}
+          className="button flex-1 flex items-center justify-center gap-2 bg-accent text-background py-2.5 rounded-xl font-medium text-sm active:scale-[0.985] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Play className="w-4 h-4" />
           Run on MI300X
         </button>
         <button
           onClick={onReplay}
-          className="button px-4 border border-border rounded-xl text-sm flex items-center justify-center hover:bg-surface-2 transition-colors"
+          disabled={disabled}
+          className="button px-4 border border-border rounded-xl text-sm flex items-center justify-center hover:bg-surface-2 transition-colors disabled:opacity-50"
         >
           <RotateCcw className="w-4 h-4" />
         </button>

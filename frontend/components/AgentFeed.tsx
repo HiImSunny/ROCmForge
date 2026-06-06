@@ -96,8 +96,10 @@ export function AgentFeed({
                 <span className={`font-medium ${getAgentColor(msg.agent)}`}>{msg.agent}</span>
                 <span className="text-text-secondary"> — </span>
                 <span className={
-                  msg.type === "thought" ? "agent-thought" : 
-                  msg.type === "action" ? "agent-action" : "agent-observation"
+                  (msg.content.toLowerCase().includes('fail') || msg.content.toLowerCase().includes('error')) 
+                    ? 'text-danger/90 font-medium' 
+                    : msg.type === "thought" ? "agent-thought" : 
+                      msg.type === "action" ? "agent-action" : "agent-observation"
                 }>
                   {msg.content}
                 </span>

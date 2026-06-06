@@ -113,69 +113,88 @@ def run_baseline(
     (ws_dir / "logs" / "hipcc.log").write_text(log)
     job.hipcc_command = f"hipcc -O3 --offload-arch=gfx942 ... -o {binary.name}"
 
-    if not ok and not MOCK:
+    compile_success = (ok == 0)
+
+    if not compile_success and not MOCK:
         job.status = JobStatus.FAILED
-        job.error = f"hipcc failed: {err[:500]}"
-        _append_message(job, "HIP Porting Specialist", "observation", "hipcc failed — see logs/hipcc.log. In Phase 2 this would trigger an autonomous repair loop with apply_patch.")
-        ws.write_state(job)
-        return job
+        job.error = f"hipcc failed: {err[:800]}"
+        _append_message(job, "HIP Porting Specialist", "observation", f"hipcc failed on real hardware. Full error captured in logs/hipcc.log. Phase 2 agents would now read the error + source and attempt autonomous repair. Continuing to produce diagnostic report + artifacts anyway.")
+        # Do NOT early return — we still want a useful report + tar for the user
+    else:
+        _append_message(job, "HIP Porting Specialist", "observation", f"hipcc succeeded cleanly on gfx942. Binary ready: {binary.name}. Moving to execution.")
+        if on_progress: on_progress(job)
 
-    _append_message(job, "HIP Porting Specialist", "observation", f"hipcc succeeded cleanly on gfx942. Binary ready: {binary.name}. Moving to execution.")
-    if on_progress: on_progress(job)
+    # 5-6. Run + validate + metrics ONLY if compile succeeded
+    run_stdout = ""
+    if compile_success:
+        _advance(job, JobPhase.BENCHMARKING, ws)
+        _append_message(job, "Benchmark & Profiler", "action", "Executing benchmark binary + capturing live amd-smi telemetry (util, power, temp).")
 
-    # 5. Run + capture metrics
-    _advance(job, JobPhase.BENCHMARKING, ws)
-    _append_message(job, "Benchmark & Profiler", "action", "Executing benchmark binary + capturing live amd-smi telemetry (util, power, temp).")
+        pre = capture_amd_smi_snapshot()
+        rc, stdout, stderr, wall = run_binary(binary, [])
+        run_stdout = stdout
+        (ws_dir / "logs" / "run.log").write_text(f"rc={rc}\nstdout:\n{stdout}\nstderr:\n{stderr}")
+        post = capture_amd_smi_snapshot()
 
-    pre = capture_amd_smi_snapshot()
-    rc, stdout, stderr, wall = run_binary(binary, [])
-    (ws_dir / "logs" / "run.log").write_text(f"rc={rc}\nstdout:\n{stdout}\nstderr:\n{stderr}")
-    post = capture_amd_smi_snapshot()
+        parsed = parse_binary_output_for_metrics(stdout)
 
-    parsed = parse_binary_output_for_metrics(stdout)
+        raw = RawMetrics(
+            gpu_utilization_percent=post.gpu_utilization_percent or pre.gpu_utilization_percent or 91.0,
+            power_watts_avg=post.power_watts_avg or 675.0,
+            power_watts_peak=post.power_watts_peak or 708.0,
+            temperature_c=post.temperature_c or 67.0,
+        )
 
-    raw = RawMetrics(
-        gpu_utilization_percent=post.gpu_utilization_percent or pre.gpu_utilization_percent or 91.0,
-        power_watts_avg=post.power_watts_avg or 675.0,
-        power_watts_peak=post.power_watts_peak or 708.0,
-        temperature_c=post.temperature_c or 67.0,
-    )
+        derived = DerivedMetrics(
+            kernel_time_ms=parsed.get("kernel_time_ms", round(wall * 1000, 2)),
+            achieved_bw_gbs=parsed.get("achieved_bw_gbs"),
+            achieved_tflops=parsed.get("achieved_tflops"),
+        )
 
-    derived = DerivedMetrics(
-        kernel_time_ms=parsed.get("kernel_time_ms", round(wall * 1000, 2)),
-        achieved_bw_gbs=parsed.get("achieved_bw_gbs"),
-        achieved_tflops=parsed.get("achieved_tflops"),
-    )
+        if job.seed_id.value == "vectorAdd" and derived.achieved_bw_gbs:
+            derived.efficiency_percent = round((derived.achieved_bw_gbs / derived.theoretical_peak_gbs) * 100, 1)
+        if job.seed_id.value == "tiledMatmul" and derived.achieved_tflops:
+            derived.efficiency_tflops_percent = round((derived.achieved_tflops / derived.theoretical_peak_tflops) * 100, 1)
 
-    if job.seed_id.value == "vectorAdd" and derived.achieved_bw_gbs:
-        derived.efficiency_percent = round((derived.achieved_bw_gbs / derived.theoretical_peak_gbs) * 100, 1)
-    if job.seed_id.value == "tiledMatmul" and derived.achieved_tflops:
-        derived.efficiency_tflops_percent = round((derived.achieved_tflops / derived.theoretical_peak_tflops) * 100, 1)
+        job.metrics = JobMetrics(raw=raw, derived=derived)
+        _append_message(job, "Benchmark & Profiler", "observation", f"Kernel completed in ~{derived.kernel_time_ms:.2f} ms. Real-time telemetry captured. {len(job.messages)} decisions so far.")
 
-    job.metrics = JobMetrics(raw=raw, derived=derived)
-    _append_message(job, "Benchmark & Profiler", "observation", f"Kernel completed in ~{derived.kernel_time_ms:.2f} ms. Real-time telemetry captured. {len(job.messages)} decisions so far.")
+        # 6. Validation
+        _advance(job, JobPhase.VALIDATING, ws)
+        validation_ok = rc == 0 and ("completed successfully" in stdout.lower() or "reduction result" in stdout.lower())
+        job.validation_passed = validation_ok
+        job.max_abs_diff = 0.0
+        _append_message(job, "Validator", "observation", f"Self-validation {'PASSED' if validation_ok else 'ISSUES DETECTED'} against embedded reference. Max diff recorded.")
+    else:
+        # For failed compile we still want something in metrics/logs for the report
+        run_stdout = f"COMPILE FAILED\n{job.error or ''}\nSee logs/hipcc.log for full compiler output."
+        job.validation_passed = False
 
-    # 6. Validation
-    _advance(job, JobPhase.VALIDATING, ws)
-    validation_ok = rc == 0 and ("completed successfully" in stdout.lower() or "reduction result" in stdout.lower())
-    job.validation_passed = validation_ok
-    job.max_abs_diff = 0.0
-    _append_message(job, "Validator", "observation", f"Self-validation {'PASSED' if validation_ok else 'ISSUES DETECTED'} against embedded reference. Max diff recorded.")
+    # Decide final status first (so the report sees the correct "COMPLETED" / "FAILED")
+    if compile_success:
+        final_status = JobStatus.COMPLETED
+        final_phase = JobPhase.COMPLETED
+        final_thought = "Baseline pipeline finished successfully. All artifacts produced. Ready for real MI300X run (set ROCFORGE_MOCK=0). This baseline will be wrapped by real agents in Phase 2."
+    else:
+        final_status = JobStatus.FAILED
+        final_phase = JobPhase.FAILED
+        final_thought = "Pipeline stopped at compile step. Diagnostic report + full logs + attempted HIP sources have been packaged into the artifacts tar so you have everything needed to debug or continue manually. On Phase 2 this would have been a repair loop."
 
-    # 7. Report + artifacts
+    # 7. Report + artifacts — ALWAYS produce (even on compile failure). Critical for real hardware runs.
     _advance(job, JobPhase.REPORTING, ws)
-    report_path = generate_minimal_report(job, ws_dir, stdout)
+    report_path = generate_minimal_report(job, ws_dir, run_stdout)
     job.report_md_path = str(report_path)
     tar_path = ws.create_tar(job)
     job.artifacts_tar_path = str(tar_path)
 
-    _append_message(job, "Reporter", "observation", f"Polished migration_report.md + artifacts tar ready. Total decisions logged: {len(job.messages)}")
+    _append_message(job, "Reporter", "observation", f"Report + artifacts tar ready (diagnostic if compile failed). Total decisions logged: {len(job.messages)}")
 
-    # 8. Done
-    _advance(job, JobPhase.COMPLETED, ws)
-    job.status = JobStatus.COMPLETED
-    job.phase = JobPhase.COMPLETED
-    _append_message(job, "Baseline Orchestrator", "thought", "Baseline pipeline finished. All artifacts produced. Ready for real MI300X run (set ROCFORGE_MOCK=0). This baseline will be wrapped by real agents in Phase 2.")
+    # 8. Finalize
+    _advance(job, final_phase, ws)
+    job.status = final_status
+    job.phase = final_phase
+    _append_message(job, "Baseline Orchestrator", "thought", final_thought)
+
     ws.write_state(job)
 
     if on_progress:
@@ -199,6 +218,17 @@ def generate_minimal_report(job: JobState, ws_dir: Path, run_stdout: str) -> Pat
         secs = (job.updated_at - job.created_at).total_seconds()
         duration = f"{secs:.1f}s"
 
+    is_failed = job.status == JobStatus.FAILED or job.phase == JobPhase.FAILED
+
+    exec_summary = (
+        f"**FAILED** at compile step.\n"
+        f"hipcc returned error (see logs/hipcc.log and the error field). "
+        f"Diagnostic report + attempted ported sources + full logs are included in the artifacts tar."
+        if is_failed else
+        f"Baseline (non-agent) port of {job.seed_id.value} completed in {d.kernel_time_ms:.1f} ms.\n"
+        f"Achieved {d.achieved_bw_gbs or d.achieved_tflops} ({eff}% of theoretical {peak_note})."
+    )
+
     content = f"""# ROCmForge Migration Report — {job.seed_id.value}
 
 **Job ID**: {job.job_id}  
@@ -207,10 +237,10 @@ def generate_minimal_report(job: JobState, ws_dir: Path, run_stdout: str) -> Pat
 **Mode**: {"MOCK (local dev)" if MOCK else "REAL MI300X"}  
 **Total Duration**: {duration}  
 **Messages / Decisions**: {len(job.messages)}
+**Final Status**: {"FAILED" if is_failed else "COMPLETED"}
 
 ## Executive Summary
-Baseline (non-agent) port of {job.seed_id.value} completed in {d.kernel_time_ms:.1f} ms.
-Achieved {d.achieved_bw_gbs or d.achieved_tflops} ({eff}% of theoretical {peak_note}).
+{exec_summary}
 
 ## Swarm Journey (Baseline Pipeline)
 1. Analysis — seed copied and inspected.
@@ -228,7 +258,18 @@ Achieved {d.achieved_bw_gbs or d.achieved_tflops} ({eff}% of theoretical {peak_n
 | Power (avg/peak W)      | {m.raw.power_watts_avg}/{m.raw.power_watts_peak} | —          | amd-smi |
 | Utilization             | {m.raw.gpu_utilization_percent}% | —              | amd-smi |
 
-**Key takeaway**: {"All numbers from real MI300X amd-smi + hipEvent timing." if not MOCK else "MOCK data — replace with real run on MI300X."}
+**Key takeaway**: {"COMPILE/PORT FAILED on this run — see the Migration Notes section + logs/ for details. All attempted sources and logs are in the tar." if is_failed else ("All numbers from real MI300X amd-smi + hipEvent timing." if not MOCK else "MOCK data — replace with real run on MI300X.")}
+
+## Migration Notes & Limitations (Partial Success Path)
+This Phase 1 baseline performs a direct hipify + compile + benchmark. On real hardware:
+
+- hipify may succeed with warnings or require small manual mappings (cuda* → hip*, launch syntax, etc.).
+- hipcc may fail on the first pass for more complex CUDA (unknown identifiers, arch-specific intrinsics, etc.).
+- In that case the pipeline records the exact error in logs/hipcc.log and produces this report with everything that **did** work plus the commands you can copy-paste to iterate manually.
+
+**Phase 2 agents** will read the failure, propose targeted patches (search/replace or unified diff), re-run hipcc, and only surface to the user after autonomous repair loops (capped). The final report will contain the "before/after" diff and the rationale.
+
+For now this report + the artifacts tar + the raw logs give you a reproducible starting point for any manual finishing work.
 
 ## Generated Artifacts
 - Ported HIP sources + binary: hip_out/

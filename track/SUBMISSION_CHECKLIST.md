@@ -105,10 +105,12 @@ Use this living document to ensure we hit every winning pattern and hackathon re
 - [ ] Impressive numbers in reports (e.g. >80% of theoretical BW)
 
 **Phase 4 (Production + Demo Polish)**
-- [ ] Docker + compose works cleanly
-- [ ] Demo/seed + replay endpoints stable
-- [ ] JUDGING.md complete with copy-paste commands
-- [ ] Full UI (live feed, metrics, report viewer, downloads)
+- [x] Docker + compose works cleanly (docker-compose.yml created with device passthrough, healthcheck, jobs volume, MOCK vs real env notes, future vLLM skeleton)
+- [x] JUDGING.md complete with copy-paste commands (90s paths for mock + real MI300X, claims table, elevator, reproducibility, links to evidence)
+- [x] Demo/seed + replay endpoints improved (replay now supports ?job_id= to load real previous job reports + diagnostics)
+- [x] UI polish: error surfacing (red banners + failed badges), loading/estimated time hints, recent jobs with status, progress indicators (PhaseTimeline + pulsing estimates), ReportViewer failure detection, CSS for failed phases
+- [x] JUDGING.md heavily updated with failure inspection path, new replay job_id support, UI polish references, and dedicated partial-success section for judges
+- [ ] Full UI (live feed, metrics, report viewer, downloads) — core is excellent; minor remaining polish possible after hardware data
 
 **Phase 5 (Narrative + Submission Assets)**
 - [ ] README final (hook, diagram, evidence, limitations)

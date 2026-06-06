@@ -196,6 +196,15 @@ button[aria-label] {
   color: var(--background);
 }
 
+/* Failure visual for PhaseTimeline when a job has failed */
+.phase-step .phase-dot.failed,
+.phase-step.active .phase-dot.failed {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: white;
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.15);
+}
+
 /* Metric sparklines - clean, not library default */
 .recharts-area {
   opacity: 0.85;

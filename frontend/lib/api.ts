@@ -19,6 +19,7 @@ export interface CreateJobResponse {
   metrics: any;
   completed_phases: string[];
   duration_seconds?: number | null;
+  error?: string | null;   // populated on hipify/hipcc/run failures for UI banners
 }
 
 // Simple retry with exponential backoff (good for unstable cloud instance connections)
@@ -81,4 +82,10 @@ export async function listJobs(limit = 10) {
   const res = await fetchWithRetry(`${API_BASE}/jobs?limit=${limit}`);
   if (!res.ok) return [];
   return res.json();
+}
+
+// For better error display in UI
+export function extractErrorMessage(error: any): string {
+  if (error?.message) return error.message;
+  return 'Unknown error occurred. Check backend logs.';
 }

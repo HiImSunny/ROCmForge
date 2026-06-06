@@ -67,12 +67,24 @@ export function ReportViewer({ jobId, initialMarkdown }: ReportViewerProps) {
     );
   }
 
+  const isFailureReport = markdown?.includes('**FAILED**') || markdown?.toLowerCase().includes('execution failed') || markdown?.toLowerCase().includes('hipcc failed');
+
   return (
     <div className="surface p-8 max-w-3xl mx-auto">
       <div className="mb-8">
-        <div className="uppercase tracking-[2px] text-xs text-accent mb-2">Migration Complete</div>
-        <h2 className="text-4xl font-semibold tracking-tighter">Report for job {jobId}</h2>
-        <div className="text-text-secondary mt-1">Real MI300X • Captured on hardware</div>
+        {isFailureReport ? (
+          <>
+            <div className="uppercase tracking-[2px] text-xs text-danger mb-2">DIAGNOSTIC REPORT — PARTIAL / FAILED RUN</div>
+            <h2 className="text-4xl font-semibold tracking-tighter text-danger">Report for job {jobId}</h2>
+            <div className="text-text-secondary mt-1">Contains failure details + migration guidance (see Migration Notes section)</div>
+          </>
+        ) : (
+          <>
+            <div className="uppercase tracking-[2px] text-xs text-accent mb-2">Migration Complete</div>
+            <h2 className="text-4xl font-semibold tracking-tighter">Report for job {jobId}</h2>
+            <div className="text-text-secondary mt-1">Real MI300X • Captured on hardware</div>
+          </>
+        )}
       </div>
 
       {/* Render the real (or fallback) markdown report beautifully */}

@@ -45,6 +45,8 @@ export function LiveJobView({ jobId, isReplay, onClose }: LiveJobViewProps) {
           messages: data.messages,
           metrics: data.metrics,
           completed_phases: data.completed_phases,
+          duration_seconds: data.duration_seconds,
+          error: data.error,
         });
       } catch (e) {
         // keep previous data
@@ -105,6 +107,16 @@ export function LiveJobView({ jobId, isReplay, onClose }: LiveJobViewProps) {
   const completedPhases = jobData?.completed_phases || ["Analysis", "Porting", "Validating"];
   const seedName = jobData?.seed_id || "vectorAdd";
 
+  // Simple estimated time hints for UX (Phase 1 baseline is fast on MI300X)
+  const phaseEstimates: Record<string, string> = {
+    'Analysis': '5-10s',
+    'Porting': '15-40s (hipify + hipcc)',
+    'Validating': '5s',
+    'Benchmarking': '10-20s + amd-smi',
+    'Reporting': '3s',
+  };
+  const estimate = phaseEstimates[currentPhase] || 'running...';
+
   const handleDownload = async () => {
     if (isReplay) {
       toast.info("Replay mode — artifacts would be served from pre-captured run on real MI300X");
@@ -140,6 +152,11 @@ export function LiveJobView({ jobId, isReplay, onClose }: LiveJobViewProps) {
             <div className="px-3 py-1 rounded-full bg-accent/10 text-accent text-xs font-medium tracking-wide">
               {isReplay ? "REPLAY" : "LIVE"} • REAL MI300X
             </div>
+            {jobData?.status === 'failed' && (
+              <div className="px-3 py-1 rounded-full bg-danger/20 text-danger text-xs font-semibold tracking-wide border border-danger/40">
+                FAILED
+              </div>
+            )}
             <div className="font-mono text-sm text-text-secondary">{jobId}</div>
           </div>
           <h2 className="text-3xl font-semibold tracking-tighter mt-1">{seedName} seed</h2>
@@ -147,6 +164,12 @@ export function LiveJobView({ jobId, isReplay, onClose }: LiveJobViewProps) {
             Autonomous port + benchmark on AMD Instinct MI300X
             {jobData?.duration_seconds ? ` • ${(jobData.duration_seconds / 60).toFixed(1)} min` : ''}
           </p>
+          {jobData?.status !== 'failed' && jobData?.status !== 'completed' && (
+            <div className="text-[11px] text-accent/80 mt-1 font-mono flex items-center gap-2">
+              <span className="inline-block w-1.5 h-1.5 bg-accent rounded-full animate-pulse" />
+              Current phase estimate: {estimate} • Streaming live updates via SSE + polling
+            </div>
+          )}
         </div>
 
         <button 
@@ -157,11 +180,25 @@ export function LiveJobView({ jobId, isReplay, onClose }: LiveJobViewProps) {
         </button>
       </div>
 
-      {/* Better error display for hipify/hipcc failures */}
-      {jobData?.status === 'failed' && jobData?.error && (
-        <div className="bg-danger/10 border border-danger/30 text-danger px-4 py-3 rounded-xl text-sm">
-          <strong>Execution Error:</strong> {jobData.error}
-          <div className="text-xs mt-1 opacity-75">Check logs/ in the job workspace on the instance.</div>
+      {/* Prominent error surfacing for real hipify / hipcc / run failures */}
+      {jobData?.status === 'failed' && (
+        <div className="bg-danger/10 border border-danger/40 text-danger px-4 py-4 rounded-2xl text-sm">
+          <div className="font-semibold mb-1 flex items-center gap-2">
+            <span>⚠️ Port / Execution Failed</span>
+            <span className="text-[10px] px-2 py-0.5 rounded bg-danger/20 border border-danger/40">DIAGNOSTIC REPORT AVAILABLE</span>
+          </div>
+          <div className="text-danger/90">
+            {jobData.error 
+              ? jobData.error 
+              : (jobData.messages?.slice().reverse().find((m: any) => 
+                  m.content.toLowerCase().includes('fail') || 
+                  m.content.toLowerCase().includes('error') ||
+                  m.content.toLowerCase().includes('hipcc')
+                )?.content || 'See the last messages below and the generated report for details.')}
+          </div>
+          <div className="text-xs mt-2 opacity-70">
+            Full hipify/hipcc logs + attempted sources are inside the artifacts tar. The migration report contains guidance.
+          </div>
         </div>
       )}
 
@@ -181,6 +218,7 @@ export function LiveJobView({ jobId, isReplay, onClose }: LiveJobViewProps) {
       <PhaseTimeline 
         currentPhase={currentPhase} 
         completedPhases={completedPhases as any} 
+        status={jobData?.status}
       />
 
       {/* Bottom actions */}
@@ -190,7 +228,12 @@ export function LiveJobView({ jobId, isReplay, onClose }: LiveJobViewProps) {
           disabled={loadingReport}
           className="flex-1 h-12 rounded-2xl bg-accent text-background font-medium flex items-center justify-center gap-2 active:scale-[0.985] transition-transform disabled:opacity-60"
         >
-          {loadingReport ? "Preparing..." : "Download Migration Report + Artifacts"}
+          {loadingReport 
+            ? "Preparing..." 
+            : jobData?.status === 'failed' 
+              ? "Download Diagnostic Report + Logs (Failure Details)" 
+              : "Download Migration Report + Artifacts"
+          }
         </button>
         <button 
           onClick={() => {

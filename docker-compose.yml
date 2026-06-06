@@ -1,0 +1,96 @@
+version: "3.8"
+
+# ROCmForge — Docker Compose for Phase 1 baseline (and future agent swarm)
+#
+# Usage on AMD MI300X instance (after Day 0 verification):
+#   docker compose up -d --build
+#   curl http://localhost:8000/health
+#   curl -X POST "http://localhost:8000/demo/seed?seed_id=vectorAdd"
+#
+# On real hardware you MUST pass devices for ROCm visibility inside containers.
+# The compose file documents the flags; adjust image/base as needed from your Day 0 success.
+#
+# For pure local development (Windows/mac/Linux without ROCm):
+#   ROCFORGE_MOCK=1 docker compose up --build
+#
+# Future (Phase 2+): uncomment/add the vllm-brain service when agent reasoning is wired.
+
+services:
+  rocmforge-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: rocmforge-backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Set to "0" on the real MI300X instance (after you have confirmed amd-smi + hipcc work on host/container)
+      - ROCFORGE_MOCK=1
+      - PYTHONUNBUFFERED=1
+    # === Critical for real AMD MI300X ===
+    # These give the container access to the Instinct GPUs via ROCm.
+    # Remove or comment when running pure mock on a dev machine.
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    group_add:
+      - video
+    ipc: host
+    shm_size: 8gb
+    volumes:
+      # Persist jobs (reports, tars, state) across restarts
+      - ./jobs:/app/jobs
+      # Read-only seeds (never mutate the originals inside container)
+      - ./seeds:/app/seeds:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Example frontend (optional, for when you want a single `docker compose up` that serves the Next.js UI too)
+  # Build the frontend separately or extend with a multi-stage Dockerfile if desired.
+  # For hackathon velocity the frontend is usually run with `npm run dev` pointing at the backend URL.
+  # rocmforge-frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - NEXT_PUBLIC_API_URL=http://rocmforge-backend:8000
+  #   depends_on:
+  #     - rocmforge-backend
+  #   restart: unless-stopped
+
+# Example future vLLM brain service (Phase 2 agent reasoning). Keep commented until wired.
+# vllm-brain:
+#   image: rocm/vllm:latest   # or the exact image + tag that passed Day 0
+#   container_name: rocmforge-vllm
+#   devices:
+#     - /dev/kfd
+#     - /dev/dri
+#   group_add:
+#     - video
+#   ipc: host
+#   shm_size: 16gb
+#   environment:
+#     - HSA_OVERRIDE_GFX_VERSION=11.0.0
+#   command: >
+#     vllm serve Qwen/Qwen2.5-Coder-32B-Instruct
+#     --port 8001
+#     --gpu-memory-utilization 0.80
+#     --tensor-parallel-size 1
+#     --max-model-len 16384
+#   ports:
+#     - "8001:8001"
+#   restart: unless-stopped
+
+# Notes for the instance operator:
+# 1. On first real run: docker compose build --no-cache
+# 2. Watch amd-smi in another terminal while a job runs.
+# 3. Use /admin/cleanup?max_age_hours=12 to keep disk reasonable.
+# 4. Point any external frontend at http://<instance-ip>:8000
+# 5. For JUDGING.md 90s verification use the /demo/seed and /health endpoints.
