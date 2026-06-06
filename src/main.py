@@ -53,6 +53,9 @@ SEEDS_ROOT = Path(__file__).resolve().parents[2] / "seeds"
 
 
 def _to_response(job: JobState) -> JobResponse:
+    duration = None
+    if job.updated_at and job.created_at:
+        duration = (job.updated_at - job.created_at).total_seconds()
     return JobResponse(
         job_id=job.job_id,
         seed_id=job.seed_id,
@@ -61,6 +64,7 @@ def _to_response(job: JobState) -> JobResponse:
         messages=job.messages,
         metrics=job.metrics,
         completed_phases=job.completed_phases,
+        duration_seconds=duration,
     )
 
 
