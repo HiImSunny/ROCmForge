@@ -93,11 +93,13 @@ Use this living document to ensure we hit every winning pattern and hackathon re
 - [x] 3 self-contained seeds written with host timing, self-checks, and hipify-friendly structure
 - [x] Match exact frontend IDs (vectorAdd, tiledMatmul, reduction)
 
-**Phase 2 (Agentic Swarm)**
-- [ ] Agents making visible autonomous decisions
+**Phase 2 (Agentic Swarm) — Preparation in progress**
+- [x] Light preparation artifacts created (memory patterns, state machine, role docs)
+- [x] Strong Phase 2 prep: detailed plan, polished ToolRegistry + Memory (easy to use, prompt-ready), working mock repair loop harness that demonstrates real "Thought → tool call → Observation → patch → success" behavior using the actual tools.
+- [ ] Agents making visible autonomous decisions (implementation after real hardware)
 - [ ] At least one successful repair loop on a seed
-- [ ] Streaming logs / activity feed in UI
-- [ ] Memory pattern storage started
+- [ ] Streaming logs / activity feed in UI (will reuse/extend existing SSE)
+- [ ] Memory pattern storage started (jsonl exists, loader in progress)
 
 **Phase 3 (AMD Depth + Optimization)**
 - [ ] Live amd-smi sampling + % efficiency calculations
